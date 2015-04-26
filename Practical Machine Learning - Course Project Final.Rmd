@@ -1,0 +1,184 @@
+---
+title: 'Final Course Project Practical Machine Learning Course'
+author: "Charles Smith"
+date: "April 25, 2015"
+output: html_document
+---
+
+
+#Synopsis
+
+Using data collected from six individuals, a recent human activity recognition (HAR) study was conducted on the "qualitative activity recognition of weightlifting excercises" while wearing accelerometers on the belt, forearm, and arm. The data was sollected from these devices including a dumbell as the six individuals were asked to perform specific excerxises correctly and incorrectly. For more info on the study please go [here](http://groupware.les.inf.puc-rio.br/har). 
+
+Using the same dataset, the focus of this project is to use machine learning to build a model to predict the manner in which the study participants performed the exercises. This will be done using the "classe" variable from the dataset.  
+
+This document presents the results in a report using a R markdown document that can be processed by the knitr package and be transformed into an HTML file for detailed viewing. Please note, the report is designed (i.e., **echo = TRUE**) so that viewers will be able to read the related code as well.  
+
+The report can be read as follows:  
+
+#Prepare the R environment   
+
+```{r}
+library(knitr)
+opts_chunk$set(echo = TRUE, results = 'hold')
+```
+
+#Load required libraries
+
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(caTools)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(rattle)
+```
+
+
+**Please note**: It is assumed that the file activity.csv is in the current working directory. The corresponding data files can be downloaded from the following links:
+
+Training data - [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+Testing data - [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+#Loading and preprocessing the data 
+
+##Load and check the data 
+
+```{r}
+pmltrain <- read.csv("pml-training.csv", na.strings=c("NA",""), header=TRUE)
+pmltraincol <- colnames(pmltrain)
+
+pmltest <- read.csv("pml-testing.csv", na.strings=c("NA",""), header=TRUE)
+pmltestcol <- colnames(pmltest)
+
+all.equal(pmltraincol[1:length(pmltraincol)-1], pmltestcol[1:length(pmltraincol)-1])
+```
+
+##Process/transform the data into desired format for analysis
+
+1. Build a function to count the number of non-NA values in each column.
+
+```{r}
+notNAs <- function(x) {
+        as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+}
+```
+
+2. Build vector of missing data or NA columns to remove from datasets.
+```{r}
+colNAs <- notNAs(pmltrain)
+NAcoldel <- c()
+for (i in 1:length(colNAs)) {
+        if (colNAs[i] < nrow(pmltrain)) {
+                NAcoldel <- c(NAcoldel, pmltraincol[i])
+        }
+}
+```
+
+3. Remove NA data from the datasets.
+```{r}
+pmltrain <- pmltrain[,!(names(pmltrain) %in% NAcoldel)]
+pmltrain <- pmltrain[,8:length(colnames(pmltrain))]
+
+pmltest <- pmltest[,!(names(pmltest) %in% NAcoldel)]
+pmltest <- pmltest[,8:length(colnames(pmltest))]
+```
+
+##Split the traing data set into two partitions 
+```{r}
+set.seed(123)
+split = sample.split(pmltrain$classe, SplitRatio = .6)
+
+pmltrain1 = subset(pmltrain, split==TRUE)
+pmltrain1test = subset(pmltrain, split==FALSE)
+```
+
+##Confirm that data is consistent for further processing
+```{r}
+for (i in 1:length(pmltrain1test) ) {
+        for(j in 1:length(pmltrain1)) {
+                if( length( grep(names(pmltrain1[i]), names(pmltrain1test)[j]) ) ==1)  {
+                        class(pmltrain1test[j]) <- class(pmltrain1[i])
+                }      
+        }      
+}
+
+pmltrain1test <- rbind(pmltrain1[2, -58] , pmltrain1test) 
+pmltrain1test <- pmltrain1test[-1,]
+```
+
+##Build CART model
+
+1. Create CART decision tree model using the first partition of the training set.  
+```{r}
+pmltrain1treeCART = rpart(classe ~ ., data=pmltrain1)
+```
+
+2. Plot the CART model for visual inspection.
+
+```{r}
+fancyRpartPlot(pmltrain1treeCART)
+```
+
+##Test the CART model
+1. Run CART model against second partition of the training data set
+```{r}
+predpmltrain1treeCARTtest <- predict(pmltrain1treeCART, newdata=pmltrain1test, type = "class")
+```
+
+2. Print the confusion matrix for analysis
+```{r}
+print(confusionMatrix(predpmltrain1treeCARTtest, pmltrain1test$classe))
+```
+
+##Analyze CART Model confustion matrix 
+The CART model shows and accuracy of **0.7494**, indincating fairly good predictive ability. However, the random forest model should be tested to see if we can produce a higher accuracy than the CART model. The random forest model is generally viewed to be the more accurate model. However, there is a tradeoff as random forest models require more computational time to build. Therefore, in order to be chosen for out-of-sample testing, the random forest model must show significant improvement over the CART model in order to justify the additional compututational power.  
+
+
+##Build Random Forest model
+
+1. Create Random Forest decision model using the first partition of the training set.  
+```{r}
+pmltrain1treeRF = randomForest(classe ~ ., data=pmltrain1)
+```
+
+##Test the Random Forest model
+1. Run Random Forest model against second partition of the training data set
+```{r}
+predpmltrain1treeRFtest <- predict(pmltrain1treeRF, newdata=pmltrain1test, type = "class")
+```
+
+2. Print the confusion matrix for analysis
+```{r}
+print(confusionMatrix(predpmltrain1treeRFtest, pmltrain1test$classe))
+```
+##Analyze Random Forest Model confustion matrix 
+As shown in the confusion matrix, the accuracy of the random forest model is **0.9957**, which is significantly higher than the CART model (**0.7494**). While it is clear that the random forest model is indeed the superior model, the significant improvement in aaccuracy over the CART model easily justifies the additional computational power. Therefore, the random forest model was chosen for out-of-sample testing.
+
+#Out-of-sample testing
+
+The following model was used against the "testing" dataset:
+```{r}
+predTest <- predict(pmltrain1treeRF, pmltest, type = "class")
+```
+
+The below function was also used to generate the submission files. 
+```{r}
+pml_write_files = function(x){
+        n = length(x)
+        for(i in 1:n){
+                filename = paste0("problem_id_",i,".txt")
+                write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+        }
+}
+
+pml_write_files(predTest)
+```
+
+The following results were submitted for grading and all predictions were deemed 100% correct.
+```
+## 1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 
+## B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B 
+## Levels: A B C D E
+```
